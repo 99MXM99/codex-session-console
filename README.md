@@ -12,6 +12,22 @@
 - macOS：桌面 `.app`
 - Linux：`.desktop` 桌面入口
 
+## 界面预览
+
+### 总览
+
+![Overview](docs/screenshots/overview.png)
+
+### 已删除与恢复状态
+
+![Deleted View](docs/screenshots/deleted-view.png)
+
+### 主题示例
+
+![Cohere Theme](docs/screenshots/theme-cohere.png)
+
+![Lamborghini Theme](docs/screenshots/theme-lamborghini.png)
+
 ## 适合什么场景
 
 - 你有很多 Codex 对话，想统一查看和清理
