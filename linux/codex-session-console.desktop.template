@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Codex Session Console
+Comment=Manage local Codex sessions
+Exec=__EXEC_PATH__
+Icon=__ICON_PATH__
+Path=__PROJECT_DIR__
+Terminal=false
+Categories=Utility;Development;
+StartupNotify=true

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+PROJECT_DIR="__PROJECT_DIR__"
+exec "$PROJECT_DIR/tools/run_local_ui.sh" "$PROJECT_DIR" "127.0.0.1" "8876" "open" "/tmp/codex-session-console.log"

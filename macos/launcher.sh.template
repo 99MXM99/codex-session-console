@@ -1,0 +1,31 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+PROJECT_DIR="__PROJECT_DIR__"
+PORT="8876"
+HOST="127.0.0.1"
+LOG_DIR="${HOME}/Library/Logs"
+LOG_FILE="${LOG_DIR}/codex-session-console.log"
+
+show_error() {
+  /usr/bin/osascript -e "display dialog \"$1\" buttons {\"好\"} default button 1 with icon stop"
+}
+
+if [ ! -d "$PROJECT_DIR" ]; then
+  show_error "找不到项目目录：$PROJECT_DIR"
+  exit 1
+fi
+
+if ! command -v python3 >/dev/null 2>&1; then
+  show_error "系统里没有可用的 python3，无法启动 Codex Session Console。"
+  exit 1
+fi
+
+if [ ! -x "$PROJECT_DIR/tools/run_local_ui.sh" ]; then
+  show_error "缺少启动脚本：$PROJECT_DIR/tools/run_local_ui.sh"
+  exit 1
+fi
+
+mkdir -p "$LOG_DIR"
+"$PROJECT_DIR/tools/run_local_ui.sh" "$PROJECT_DIR" "$HOST" "$PORT" "open" "$LOG_FILE" || show_error "服务没有成功启动。你可以查看日志：$LOG_FILE"

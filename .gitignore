@@ -1,0 +1,14 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+dist/
+*.app
+
+# 本地临时日志
+*.log
+
+# macOS Finder 元数据
+.AppleDouble
+.LSOverride
