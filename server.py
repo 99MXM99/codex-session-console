@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import subprocess
+import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
 
 from config import DEFAULT_JSON_OUTPUT, DEFAULT_TXT_OUTPUT
 from models import ViewState
-from store import delete_sessions, export_json, export_txt, filter_by_status, filter_sessions, load_sessions, rename_session, restore_session
+from store import delete_sessions, export_json, export_txt, filter_by_status, filter_sessions, hard_delete_sessions, load_sessions, rename_session, restore_session
 from ui import build_view_query, render_html
 
 
@@ -68,20 +69,25 @@ class AppHandler(BaseHTTPRequestHandler):
         state = parse_view_state(params)
 
         if self.path == "/delete_selected":
-            message = delete_sessions(params.get("session_ids", []))
+            message = self._run_action(lambda: delete_sessions(params.get("session_ids", [])))
+            self._redirect(state, message)
+            return
+
+        if self.path == "/purge_selected":
+            message = self._run_action(lambda: hard_delete_sessions(params.get("session_ids", [])))
             self._redirect(state, message)
             return
 
         if self.path == "/rename":
             session_id = params.get("session_id", [""])[0]
             new_name = params.get("new_name", [""])[0]
-            message = rename_session(session_id, new_name)
+            message = self._run_action(lambda: rename_session(session_id, new_name))
             self._redirect(state, message)
             return
 
         if self.path == "/restore_session":
             session_id = params.get("session_id", [""])[0]
-            message = restore_session(session_id)
+            message = self._run_action(lambda: restore_session(session_id))
             self._redirect(state, message)
             return
 
@@ -107,6 +113,25 @@ class AppHandler(BaseHTTPRequestHandler):
         self.send_header("Expires", "0")
         self.end_headers()
         self.wfile.write(data)
+
+    def _run_action(self, action: Callable[[], str]) -> str:
+        """执行写操作，并把常见写入错误转成可读消息。"""
+
+        try:
+            return str(action())
+        except PermissionError as exc:
+            print(traceback.format_exc(), flush=True)
+            return (
+                "写入 Codex 本地数据失败：权限不足。"
+                f"目标文件：{exc.filename or '未知'}。"
+                "请重新从桌面应用或启动器打开，而不是使用当前无写权限的实例。"
+            )
+        except OSError as exc:
+            print(traceback.format_exc(), flush=True)
+            return f"写入 Codex 本地数据失败：{exc}"
+        except Exception as exc:
+            print(traceback.format_exc(), flush=True)
+            return f"操作失败：{exc}"
 
 
 class ReusableThreadingHTTPServer(ThreadingHTTPServer):

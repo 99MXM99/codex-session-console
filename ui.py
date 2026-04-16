@@ -54,11 +54,8 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
         state_label = "可继续对话" if record.exists else ("已删除（可恢复）" if is_recoverable else "已删除（不可恢复）")
         dot_color = "#1f9d62" if record.exists else ("#d79a00" if is_recoverable else "#d63f32")
         short_id = f"{record.id[:8]}...{record.id[-6:]}" if len(record.id) > 18 else record.id
-        select_cell = (
-            f'<input class="row-check" type="checkbox" name="session_ids" value="{html.escape(record.id)}">'
-            if record.exists and state.status == "existing"
-            else ""
-        )
+        row_selectable = (state.status == "existing" and record.exists) or (state.status == "deleted" and not record.exists)
+        select_cell = f'<input class="row-check" type="checkbox" name="session_ids" value="{html.escape(record.id)}">' if row_selectable else ""
         if record.exists:
             actions = f"""
                 <details class="action-menu">
@@ -96,12 +93,12 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
                 <span class="id-wrap">
                   <span class="status-dot" style="background:{dot_color};" title="{state_label}" aria-label="{state_label}"></span>
                   <code>{html.escape(short_id)}</code>
-                  <button class="copy-button" type="button" title="复制完整 ID" aria-label="复制完整 ID" onclick="copySessionId('{html.escape(record.id)}')">⧉</button>
+                  <button class="copy-button" type="button" title="复制完整 ID" aria-label="复制完整 ID" onclick="copySessionId('{html.escape(record.id)}', this)">⧉</button>
                 </span>
               </td>
-              <td>{html.escape(record.created_at_text)}</td>
-              <td>{html.escape(record.theme)}</td>
-              <td>{html.escape(record.renamed_title)}</td>
+              <td class="time-cell">{html.escape(record.created_at_text)}</td>
+              <td class="theme-cell">{html.escape(record.theme)}</td>
+              <td class="title-cell">{html.escape(record.renamed_title)}</td>
               <td class="actions">{actions}</td>
             </tr>
             """
@@ -170,6 +167,20 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
             <button class="button subtle" type="button" onclick="toggleAll(true)">全选</button>
             <button class="button subtle" type="button" onclick="toggleAll(false)">清空</button>
             <button class="button danger" type="submit">删除已选</button>
+          </form>
+        """
+    elif state.status == "deleted":
+        footer_actions = f"""
+          <form method="post" action="/purge_selected" class="batch-delete inline-actions" onsubmit="return submitPurgeSelected(this);">
+            <input type="hidden" name="q" value="{html.escape(state.query)}">
+            <input type="hidden" name="status" value="{html.escape(state.status)}">
+            <input type="hidden" name="page" value="{current_page}">
+            <input type="hidden" name="window" value="{window_start}">
+            <input type="hidden" name="page_size" value="{state.page_size}">
+            <input type="hidden" name="theme" value="{html.escape(theme_name)}">
+            <button class="button subtle" type="button" onclick="toggleAll(true)">全选</button>
+            <button class="button subtle" type="button" onclick="toggleAll(false)">清空</button>
+            <button class="button danger" type="submit">彻底删除已选</button>
           </form>
         """
 
@@ -564,22 +575,21 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
     }}
     table {{
       width: 100%;
+      table-layout: fixed;
       border-collapse: collapse;
       margin-top: 14px;
       background: rgba(255,255,255,0.74);
       border: 1px solid var(--line);
       border-radius: calc(var(--table-radius) - 4px);
       overflow: hidden;
-      display: block;
       box-shadow: inset 0 1px 0 rgba(255,255,255,0.35);
       {blur_css}
     }}
-    thead, tbody, tr {{ display: table; width: 100%; table-layout: fixed; }}
     col.select-width {{ width: 42px; }}
-    col.id-width {{ width: 19%; }}
-    col.time-width {{ width: 19%; }}
-    col.theme-width {{ width: 26%; }}
-    col.title-width {{ width: 20%; }}
+    col.id-width {{ width: 20%; }}
+    col.time-width {{ width: 18%; }}
+    col.theme-width {{ width: 25%; }}
+    col.title-width {{ width: 21%; }}
     col.actions-width {{ width: 132px; }}
     th, td {{
       text-align: center;
@@ -587,6 +597,7 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
       border-bottom: 1px solid var(--line);
       vertical-align: middle;
       word-break: break-word;
+      overflow: hidden;
     }}
     th {{
       color: var(--muted);
@@ -594,8 +605,19 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
       letter-spacing: 0.06em;
       text-transform: uppercase;
     }}
+    th.select-head, td.select-col {{ width: 42px; padding-left: 8px; padding-right: 8px; }}
+    th.id-head, td.id-cell {{ width: 20%; }}
+    th.time-head, td.time-cell {{ width: 18%; }}
+    th.theme-head, td.theme-cell {{ width: 25%; }}
+    th.title-head, td.title-cell {{ width: 21%; }}
+    th.actions-head, td.actions {{ width: 132px; }}
     tbody tr:last-child td {{ border-bottom: 0; }}
     .id-cell, .actions {{ text-align: center; }}
+    .id-cell {{
+      position: relative;
+      overflow: visible;
+      z-index: 2;
+    }}
     .id-wrap {{
       display: inline-flex;
       align-items: center;
@@ -618,6 +640,7 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
       white-space: nowrap;
     }}
     .copy-button {{
+      position: relative;
       display: inline-flex;
       align-items: center;
       justify-content: center;
@@ -635,8 +658,31 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
       color: var(--accent);
       border-color: var(--accent);
     }}
-    .select-col {{ width: 42px; }}
-    .actions {{ width: 132px; }}
+    .copy-button.copied {{
+      color: #ffffff;
+      border-color: var(--accent);
+      background: var(--accent);
+      transform: translateY(-1px);
+      box-shadow: 0 8px 18px rgba(24, 99, 220, 0.18);
+    }}
+    .copy-button.copied::after {{
+      content: "已复制";
+      position: absolute;
+      top: -30px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 12;
+      white-space: nowrap;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: rgba(20, 24, 31, 0.92);
+      color: #ffffff;
+      font-size: 10px;
+      line-height: 1;
+      letter-spacing: 0;
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
+      pointer-events: none;
+    }}
     .row-check {{ width: 16px; height: 16px; }}
     .batch-delete {{ margin: 0; }}
     .inline-actions {{
@@ -1127,12 +1173,12 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
           </colgroup>
           <thead>
             <tr>
-              <th></th>
-              <th>ID</th>
-              <th>时间</th>
-              <th>主题</th>
-              <th>标题</th>
-              <th>操作</th>
+              <th class="select-head"></th>
+              <th class="id-head">ID</th>
+              <th class="time-head">时间</th>
+              <th class="theme-head">主题</th>
+              <th class="title-head">标题</th>
+              <th class="actions-head">操作</th>
             </tr>
           </thead>
           <tbody>
@@ -1194,16 +1240,9 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
   <script>
     const AUTO_REFRESH_MS = {AUTO_REFRESH_MS};
     let autoRefreshTimer = null;
-    function submitDeleteSelected(form) {{
+    function appendSelectedSessionIds(form) {{
       form.querySelectorAll('input[name="session_ids"]').forEach((item) => item.remove());
       const checked = Array.from(document.querySelectorAll('.row-check:checked'));
-      if (checked.length === 0) {{
-        window.alert('请先选择要删除的会话');
-        return false;
-      }}
-      if (!window.confirm('确认删除已选中的会话？')) {{
-        return false;
-      }}
       checked.forEach((item) => {{
         const input = document.createElement('input');
         input.type = 'hidden';
@@ -1211,6 +1250,28 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
         input.value = item.value;
         form.appendChild(input);
       }});
+      return checked;
+    }}
+    function submitDeleteSelected(form) {{
+      const checked = appendSelectedSessionIds(form);
+      if (checked.length === 0) {{
+        window.alert('请先选择要删除的会话');
+        return false;
+      }}
+      if (!window.confirm('确认删除已选中的会话？')) {{
+        return false;
+      }}
+      return true;
+    }}
+    function submitPurgeSelected(form) {{
+      const checked = appendSelectedSessionIds(form);
+      if (checked.length === 0) {{
+        window.alert('请先选择要彻底删除的会话');
+        return false;
+      }}
+      if (!window.confirm('确认彻底删除已选中的会话？这会同时清理当前 Codex 数据和所有备份中的这条记录。')) {{
+        return false;
+      }}
       return true;
     }}
     function toggleAll(checked) {{
@@ -1218,7 +1279,18 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
         item.checked = checked;
       }});
     }}
-    async function copySessionId(sessionId) {{
+    function showCopyFeedback(button) {{
+      if (!button) return;
+      const originalLabel = button.dataset.label || button.textContent;
+      button.dataset.label = originalLabel;
+      button.textContent = '✓';
+      button.classList.add('copied');
+      window.setTimeout(() => {{
+        button.textContent = button.dataset.label || originalLabel;
+        button.classList.remove('copied');
+      }}, 1100);
+    }}
+    async function copySessionId(sessionId, button = null) {{
       try {{
         await navigator.clipboard.writeText(sessionId);
       }} catch (error) {{
@@ -1229,6 +1301,7 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
         document.execCommand('copy');
         document.body.removeChild(textArea);
       }}
+      showCopyFeedback(button);
     }}
     function openCommandMenu() {{
       document.getElementById('commandModal').classList.add('open');

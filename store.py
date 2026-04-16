@@ -10,6 +10,7 @@ import json
 import os
 import shutil
 import sqlite3
+from collections import OrderedDict
 from dataclasses import asdict
 from math import ceil
 from pathlib import Path
@@ -103,25 +104,30 @@ def load_sessions() -> list[SessionRecord]:
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
         """
-        select id, created_at, first_user_message, title, rollout_path
+        select rowid, id, created_at, first_user_message, title, rollout_path
         from threads
         where source = 'cli'
-        order by created_at desc
+        order by created_at desc, rowid desc
         """
     ).fetchall()
     conn.close()
 
     sessions: list[SessionRecord] = []
+    seen_ids: set[str] = set()
     for row in rows:
+        session_id = str(row["id"])
+        if session_id in seen_ids:
+            continue
+        seen_ids.add(session_id)
         rollout_path = str(row["rollout_path"] or "")
         exists = bool(rollout_path and os.path.exists(rollout_path))
         first_user_raw = str(row["first_user_message"] or "").strip()
         theme = derive_theme(first_user_raw)
-        thread_name = names.get(str(row["id"]), str(row["title"] or "")).strip()
+        thread_name = names.get(session_id, str(row["title"] or "")).strip()
         renamed_title = thread_name if thread_name and thread_name != first_user_raw else "未设置标题"
         sessions.append(
             SessionRecord(
-                id=str(row["id"]),
+                id=session_id,
                 created_at=int(row["created_at"]),
                 created_at_text=format_ts(int(row["created_at"])),
                 theme=theme,
@@ -255,24 +261,24 @@ def backup_session_rollouts(backup_dir: Path, records: list[SessionRecord]) -> N
         _write_session_file_map(backup_dir, mapping)
 
 
-def list_backups(limit: int = 8) -> list[Path]:
+def list_backups() -> list[Path]:
     if not BACKUP_DIR.exists():
         return []
     return sorted(
         [path for path in BACKUP_DIR.iterdir() if path.is_dir()],
         key=lambda p: p.name,
         reverse=True,
-    )[:limit]
+    )
 
 
-def load_recoverable_session_ids(limit: int = 8) -> set[str]:
-    """扫描最近备份，找出理论上可恢复的会话 ID。
+def load_recoverable_session_ids() -> set[str]:
+    """扫描全部备份，找出理论上可恢复的会话 ID。
 
     判断标准是：备份里既有该会话的元数据，也有对应的 rollout 文件。
     """
 
     recoverable_ids: set[str] = set()
-    for backup_dir in list_backups(limit):
+    for backup_dir in list_backups():
         file_map = _load_session_file_map(backup_dir)
         if not file_map:
             continue
@@ -309,7 +315,7 @@ def load_recoverable_session_ids(limit: int = 8) -> set[str]:
     return recoverable_ids
 
 
-def find_backup_for_session(session_id: str, limit: int = 8) -> Path | None:
+def find_backup_for_session(session_id: str) -> Path | None:
     """找到包含指定会话的最近一份备份。
 
     当前恢复能力仍是整库恢复，这里只是帮 UI 找到“按这条记录触发恢复”时要用哪份备份。
@@ -319,11 +325,11 @@ def find_backup_for_session(session_id: str, limit: int = 8) -> Path | None:
     if not clean_id:
         return None
 
-    recoverable_ids = load_recoverable_session_ids(limit)
+    recoverable_ids = load_recoverable_session_ids()
     if clean_id not in recoverable_ids:
         return None
 
-    for backup_dir in list_backups(limit):
+    for backup_dir in list_backups():
         file_map = _load_session_file_map(backup_dir)
         file_info = file_map.get(clean_id)
         if not file_info:
@@ -333,6 +339,214 @@ def find_backup_for_session(session_id: str, limit: int = 8) -> Path | None:
             return backup_dir
 
     return None
+
+
+def _remove_session_from_history(path: Path, session_ids: set[str]) -> None:
+    if not path.exists():
+        return
+    kept_lines = [
+        line
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if not any(f'"session_id":"{session_id}"' in line for session_id in session_ids)
+    ]
+    path.write_text("\n".join(kept_lines) + ("\n" if kept_lines else ""), encoding="utf-8")
+
+
+def _remove_session_from_index(path: Path, session_ids: set[str]) -> None:
+    if not path.exists():
+        return
+    rows = [row for row in load_session_index() if str(row.get("id", "")).strip() not in session_ids] if path == SESSION_INDEX_PATH else []
+    if path != SESSION_INDEX_PATH:
+        rows = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if str(row.get("id", "")).strip() not in session_ids:
+                rows.append(row)
+    write_jsonl(path, rows)
+
+
+def _delete_thread_rows_by_scan(conn: sqlite3.Connection, session_ids: set[str]) -> int:
+    rows = conn.execute("select rowid, id from threads").fetchall()
+    rowids_to_delete = [rowid for rowid, session_id in rows if str(session_id).strip() in session_ids]
+    if rowids_to_delete:
+        conn.executemany("delete from threads where rowid = ?", [(rowid,) for rowid in rowids_to_delete])
+        conn.commit()
+    return len(rowids_to_delete)
+
+
+def _rebuild_threads_table(path: Path) -> None:
+    """重建 threads 表，修复坏索引和重复 id。"""
+
+    conn = sqlite3.connect(path)
+    try:
+        table_sql = conn.execute("select sql from sqlite_master where type='table' and name='threads'").fetchone()
+        if not table_sql or not table_sql[0]:
+            return
+
+        aux_sql = conn.execute(
+            """
+            select type, name, sql
+            from sqlite_master
+            where tbl_name='threads' and type in ('index', 'trigger') and sql is not null
+            order by type, name
+            """
+        ).fetchall()
+        columns = [row[1] for row in conn.execute("pragma table_info(threads)").fetchall()]
+        selected_columns = ", ".join(columns)
+        rows = conn.execute(f"select rowid, {selected_columns} from threads order by rowid desc").fetchall()
+
+        deduped_rows: OrderedDict[str, tuple[Any, ...]] = OrderedDict()
+        for row in rows:
+            data = row[1:]
+            session_id = str(data[0]).strip()
+            if session_id not in deduped_rows:
+                deduped_rows[session_id] = data
+
+        conn.execute(table_sql[0].replace("threads", "threads_repaired", 1))
+        placeholders = ", ".join(["?"] * len(columns))
+        conn.executemany(
+            f"insert into threads_repaired ({selected_columns}) values ({placeholders})",
+            list(deduped_rows.values()),
+        )
+        conn.execute("drop table threads")
+        conn.execute("alter table threads_repaired rename to threads")
+        for _, _, sql in aux_sql:
+            conn.execute(sql)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _remove_session_from_db(path: Path, session_ids: set[str]) -> None:
+    if not path.exists() or not session_ids:
+        return
+    try:
+        conn = sqlite3.connect(path)
+        try:
+            _delete_thread_rows_by_scan(conn, session_ids)
+        finally:
+            conn.close()
+    except sqlite3.DatabaseError:
+        _rebuild_threads_table(path)
+        conn = sqlite3.connect(path)
+        try:
+            _delete_thread_rows_by_scan(conn, session_ids)
+        finally:
+            conn.close()
+
+
+def _remove_single_session_from_current_db(session_id: str) -> None:
+    """按全表扫描删除当前库里的单条会话，绕开坏索引导致的精确匹配失效。"""
+
+    _remove_session_from_db(DB_PATH, {session_id})
+
+
+def _update_thread_title_in_db(path: Path, session_id: str, new_title: str) -> int:
+    """按全表扫描更新标题，避免坏索引导致按 id 精确匹配失败。"""
+
+    if not path.exists():
+        return 0
+    try:
+        conn = sqlite3.connect(path)
+        try:
+            rows = conn.execute("select rowid, id from threads").fetchall()
+            rowids = [rowid for rowid, raw_id in rows if str(raw_id).strip() == session_id]
+            if rowids:
+                conn.executemany("update threads set title = ? where rowid = ?", [(new_title, rowid) for rowid in rowids])
+                conn.commit()
+            return len(rowids)
+        finally:
+            conn.close()
+    except sqlite3.DatabaseError:
+        _rebuild_threads_table(path)
+        conn = sqlite3.connect(path)
+        try:
+            rows = conn.execute("select rowid, id from threads").fetchall()
+            rowids = [rowid for rowid, raw_id in rows if str(raw_id).strip() == session_id]
+            if rowids:
+                conn.executemany("update threads set title = ? where rowid = ?", [(new_title, rowid) for rowid in rowids])
+                conn.commit()
+            return len(rowids)
+        finally:
+            conn.close()
+
+
+def _purge_backup_traces(session_ids: set[str]) -> tuple[int, int]:
+    """从所有备份目录里删掉指定会话的元数据和原始文件痕迹。"""
+
+    touched_backups = 0
+    removed_rollouts = 0
+    for backup_dir in list_backups():
+        touched = False
+        file_map = _load_session_file_map(backup_dir)
+        if file_map:
+            sessions_dir = backup_dir / "sessions"
+            for session_id in list(session_ids):
+                file_info = file_map.pop(session_id, None)
+                if not file_info:
+                    continue
+                backup_name = file_info.get("backup_name", "")
+                if backup_name:
+                    backup_file = sessions_dir / backup_name
+                    if backup_file.exists():
+                        backup_file.unlink()
+                        removed_rollouts += 1
+                touched = True
+            mapping_path = _session_files_map_path(backup_dir)
+            if file_map:
+                _write_session_file_map(backup_dir, file_map)
+            elif mapping_path.exists():
+                mapping_path.unlink()
+            if sessions_dir.exists() and not any(sessions_dir.iterdir()):
+                sessions_dir.rmdir()
+
+        index_backup = backup_dir / "session_index.jsonl"
+        if index_backup.exists():
+            before = index_backup.read_text(encoding="utf-8")
+            _remove_session_from_index(index_backup, session_ids)
+            if index_backup.read_text(encoding="utf-8") != before:
+                touched = True
+
+        history_backup = backup_dir / "history.jsonl"
+        if history_backup.exists():
+            before = history_backup.read_text(encoding="utf-8")
+            _remove_session_from_history(history_backup, session_ids)
+            if history_backup.read_text(encoding="utf-8") != before:
+                touched = True
+
+        db_backup = backup_dir / "state_5.sqlite"
+        if db_backup.exists():
+            try:
+                conn = sqlite3.connect(db_backup)
+                try:
+                    changed = _delete_thread_rows_by_scan(conn, session_ids) > 0
+                    if changed:
+                        touched = True
+                finally:
+                    conn.close()
+            except sqlite3.Error:
+                try:
+                    _rebuild_threads_table(db_backup)
+                    conn = sqlite3.connect(db_backup)
+                    try:
+                        changed = _delete_thread_rows_by_scan(conn, session_ids) > 0
+                        if changed:
+                            touched = True
+                    finally:
+                        conn.close()
+                except sqlite3.Error:
+                    # 某些历史备份库可能已经损坏，不阻断当前会话的彻底删除。
+                    pass
+
+        if touched:
+            touched_backups += 1
+
+    return touched_backups, removed_rollouts
 
 
 def restore_backup(backup_name: str) -> str:
@@ -380,6 +594,7 @@ def restore_session(session_id: str) -> str:
         return f"会话 {clean_id} 缺少可恢复的数据库备份。"
 
     ensure_backup([HISTORY_PATH, SESSION_INDEX_PATH, DB_PATH])
+    _rebuild_threads_table(DB_PATH)
 
     backup_conn = sqlite3.connect(backup_db)
     backup_conn.row_factory = sqlite3.Row
@@ -393,9 +608,10 @@ def restore_session(session_id: str) -> str:
     column_list = ", ".join(columns)
     values = [row[column] for column in columns]
 
+    _remove_single_session_from_current_db(clean_id)
     current_conn = sqlite3.connect(DB_PATH)
     current_conn.execute(
-        f"insert or replace into threads ({column_list}) values ({placeholders})",
+        f"insert into threads ({column_list}) values ({placeholders})",
         values,
     )
     current_conn.commit()
@@ -449,15 +665,10 @@ def delete_sessions(session_ids: list[str]) -> str:
     records = {item.id: item for item in load_sessions()}
     backup_session_rollouts(backup_dir, [record for session_id, record in records.items() if session_id in clean_ids])
 
-    if HISTORY_PATH.exists():
-        kept_lines = [
-            line
-            for line in HISTORY_PATH.read_text(encoding="utf-8").splitlines()
-            if not any(f'"session_id":"{session_id}"' in line for session_id in clean_ids)
-        ]
-        HISTORY_PATH.write_text("\n".join(kept_lines) + ("\n" if kept_lines else ""), encoding="utf-8")
+    session_id_set = set(clean_ids)
+    _remove_session_from_history(HISTORY_PATH, session_id_set)
 
-    index_rows = [row for row in load_session_index() if str(row.get("id", "")) not in clean_ids]
+    index_rows = [row for row in load_session_index() if str(row.get("id", "")).strip() not in session_id_set]
     write_jsonl(SESSION_INDEX_PATH, index_rows)
 
     removed_files = 0
@@ -470,6 +681,48 @@ def delete_sessions(session_ids: list[str]) -> str:
                 removed_files += 1
 
     return f"已删除 {len(clean_ids)} 条会话，清理 {removed_files} 个会话文件。备份已保存到 {backup_dir}"
+
+
+def hard_delete_sessions(session_ids: list[str]) -> str:
+    """彻底删除会话，并同步清理当前数据与所有备份中的痕迹。"""
+
+    clean_ids = [session_id.strip() for session_id in session_ids if session_id.strip()]
+    if not clean_ids:
+        return "请先选择要彻底删除的会话。"
+
+    session_id_set = set(clean_ids)
+    records = {item.id: item for item in load_sessions()}
+
+    _rebuild_threads_table(DB_PATH)
+    _remove_session_from_history(HISTORY_PATH, session_id_set)
+    _remove_session_from_index(SESSION_INDEX_PATH, session_id_set)
+    _remove_session_from_db(DB_PATH, session_id_set)
+
+    removed_live_rollouts = 0
+    for session_id in session_id_set:
+        record = records.get(session_id)
+        if record and record.rollout_path:
+            rollout_path = Path(record.rollout_path)
+            if rollout_path.exists():
+                rollout_path.unlink()
+                removed_live_rollouts += 1
+
+    touched_backups, removed_backup_rollouts = _purge_backup_traces(session_id_set)
+    total_removed_rollouts = removed_live_rollouts + removed_backup_rollouts
+
+    remaining_ids = {item.id for item in load_sessions()}
+    not_removed = sorted(session_id for session_id in session_id_set if session_id in remaining_ids)
+    if not_removed:
+        raise RuntimeError(
+            "彻底删除未完成，以下会话仍然存在于当前 Codex 数据中："
+            + ", ".join(not_removed)
+        )
+
+    return (
+        f"已彻底删除 {len(session_id_set)} 条会话，"
+        f"清理 {total_removed_rollouts} 个会话文件，"
+        f"同步更新 {touched_backups} 份备份。"
+    )
 
 
 def rename_session(session_id: str, new_name: str) -> str:
@@ -493,9 +746,8 @@ def rename_session(session_id: str, new_name: str) -> str:
         rows.append({"id": session_id, "thread_name": clean_name, "updated_at": dt.datetime.now(dt.UTC).isoformat()})
 
     write_jsonl(SESSION_INDEX_PATH, rows)
-
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("update threads set title = ? where id = ?", (clean_name, session_id))
-    conn.commit()
-    conn.close()
+    _rebuild_threads_table(DB_PATH)
+    updated_count = _update_thread_title_in_db(DB_PATH, session_id, clean_name)
+    if updated_count == 0:
+        raise RuntimeError(f"未在当前 Codex 数据中找到会话 {session_id}，无法设置标题。")
     return f"已重命名会话 {session_id}。备份已保存到 {backup_dir}"

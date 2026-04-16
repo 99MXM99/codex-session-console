@@ -42,10 +42,12 @@ The current version runs as a local Web UI by default and also supports desktop-
 - Search by `ID / topic / title`
 - Set custom titles in the UI
 - Bulk delete for existing sessions
+- Permanent delete for already deleted sessions
 - Restore deleted sessions when single-session recovery is supported by backups
 - Export as `txt` / `json`
 - Multiple built-in themes
 - Desktop launch support for macOS and Linux
+- Self-healing writes for damaged `threads` table metadata
 
 ## Requirements
 
@@ -175,6 +177,7 @@ At the bottom you can:
 - switch pages
 - adjust page size
 - bulk delete selected sessions in the `Existing` view
+- permanently delete selected sessions in the `Deleted` view
 
 ## Common Commands
 
@@ -232,9 +235,13 @@ Backup directory:
 ```
 
 Notes:
+- Recoverability is checked against all backups, not just the newest few.
 - Older backups may not contain complete original session files.
 - Newer deletions also back up the matching rollout files.
 - A session is only considered individually recoverable when both metadata and the original session file are available in backup data.
+- Permanent delete removes the session from the current Codex data and also scrubs matching traces from all stored backups.
+- If the local `threads` table becomes inconsistent or contains duplicate session IDs, write operations rebuild that table before continuing.
+- Corrupted historical backup databases are skipped instead of blocking current delete operations.
 
 ## Project Structure
 
@@ -283,6 +290,8 @@ The current version has already gone through a cleanup pass focused on maintaina
 - request parsing is guarded so invalid pagination values do not crash the server
 - malformed lines in `session_index.jsonl` are skipped instead of failing the whole UI
 - the macOS desktop app uses a repository-bundled icon instead of rebuilding an icon during install
+- destructive writes surface readable error messages in the UI instead of failing silently
+- permanent delete and restore paths can repair a broken `threads` table before writing
 
 If you continue developing the project, keep these boundaries:
 - change data read/write behavior in `store.py`
