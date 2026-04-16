@@ -436,7 +436,10 @@ def restore_session(session_id: str) -> str:
 
 
 def delete_sessions(session_ids: list[str]) -> str:
-    """批量删除会话，并同步清理对应 rollout 文件。"""
+    """批量删除会话，并同步清理对应 rollout 文件。
+
+    这里保留 threads 表中的元数据，用于在“已删除 / 全部会话”视图中继续展示。
+    """
 
     clean_ids = [session_id.strip() for session_id in session_ids if session_id.strip()]
     if not clean_ids:
@@ -456,11 +459,6 @@ def delete_sessions(session_ids: list[str]) -> str:
 
     index_rows = [row for row in load_session_index() if str(row.get("id", "")) not in clean_ids]
     write_jsonl(SESSION_INDEX_PATH, index_rows)
-
-    conn = sqlite3.connect(DB_PATH)
-    conn.executemany("delete from threads where id = ?", [(session_id,) for session_id in clean_ids])
-    conn.commit()
-    conn.close()
 
     removed_files = 0
     for session_id in clean_ids:

@@ -13,6 +13,7 @@ from models import SessionRecord, ViewState
 from store import load_recoverable_session_ids, paginate_records, resolve_theme
 
 UI_VERSION = "v2026.04.15-2"
+AUTO_REFRESH_MS = 60_000
 
 
 def build_view_query(state: ViewState, message: str | None = None) -> str:
@@ -1191,6 +1192,8 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
     </div>
   </div>
   <script>
+    const AUTO_REFRESH_MS = {AUTO_REFRESH_MS};
+    let autoRefreshTimer = null;
     function submitDeleteSelected(form) {{
       form.querySelectorAll('input[name="session_ids"]').forEach((item) => item.remove());
       const checked = Array.from(document.querySelectorAll('.row-check:checked'));
@@ -1229,10 +1232,12 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
     }}
     function openCommandMenu() {{
       document.getElementById('commandModal').classList.add('open');
+      scheduleAutoRefresh();
     }}
     function closeCommandMenu(event) {{
       if (event && event.target && event.target !== event.currentTarget) return;
       document.getElementById('commandModal').classList.remove('open');
+      scheduleAutoRefresh();
     }}
     function copyCommand(command) {{
       copySessionId(command);
@@ -1268,6 +1273,25 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
         closeCommandMenu();
       }}
     }});
+    function shouldPauseAutoRefresh() {{
+      const modal = document.getElementById('commandModal');
+      return document.visibilityState !== 'visible' || (modal && modal.classList.contains('open'));
+    }}
+    function scheduleAutoRefresh() {{
+      if (autoRefreshTimer) {{
+        window.clearTimeout(autoRefreshTimer);
+      }}
+      autoRefreshTimer = window.setTimeout(() => {{
+        if (shouldPauseAutoRefresh()) {{
+          scheduleAutoRefresh();
+          return;
+        }}
+        window.location.reload();
+      }}, AUTO_REFRESH_MS);
+    }}
+    document.addEventListener('visibilitychange', scheduleAutoRefresh);
+    window.addEventListener('focus', scheduleAutoRefresh);
+    scheduleAutoRefresh();
   </script>
 </body>
 </html>
