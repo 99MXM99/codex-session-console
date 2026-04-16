@@ -33,6 +33,7 @@ def parse_view_state(mapping: dict[str, list[str]]) -> ViewState:
         query=first("q", ""),
         status=status,
         page=safe_int("page", 1),
+        page_window=safe_int("window", 0),
         page_size=safe_int("page_size", 10),
         theme=first("theme", "paper"),
         message=first("msg", ""),

@@ -26,6 +26,7 @@ class ViewState:
     query: str = ""
     status: str = "existing"
     page: int = 1
+    page_window: int = 0
     page_size: int = 10
     theme: str = "paper"
     message: str = ""

@@ -23,6 +23,7 @@ def build_view_query(state: ViewState, message: str | None = None) -> str:
             "q": state.query,
             "status": state.status,
             "page": state.page,
+            "window": state.page_window,
             "page_size": state.page_size,
             "theme": state.theme,
             "msg": state.message if message is None else message,
@@ -38,6 +39,12 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
     is_cohere = theme_name == "cohere"
     is_lamborghini = theme_name == "lamborghini"
     page_records, current_page, total_pages = paginate_records(records, state.page, state.page_size)
+    max_window_start = max(1, total_pages - 4)
+    requested_window_start = state.page_window if state.page_window > 0 else current_page
+    window_start = max(1, min(requested_window_start, max_window_start))
+    if current_page < window_start or current_page > window_start + 4:
+        window_start = max(1, min(current_page, max_window_start))
+    window_end = min(total_pages, window_start + 4)
     recoverable_ids = load_recoverable_session_ids()
     rows: list[str] = []
 
@@ -59,7 +66,7 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
                     <button
                       class="button small menu-item"
                       type="button"
-                      onclick="openRenameDialog('{html.escape(record.id)}', '{html.escape(record.thread_name)}', '{html.escape(state.query)}', '{html.escape(state.status)}', '{current_page}', '{state.page_size}', '{html.escape(theme_name)}')"
+                      onclick="openRenameDialog('{html.escape(record.id)}', '{html.escape(record.thread_name)}', '{html.escape(state.query)}', '{html.escape(state.status)}', '{current_page}', '{window_start}', '{state.page_size}', '{html.escape(theme_name)}')"
                     >设置标题</button>
                   </div>
                 </details>
@@ -71,6 +78,7 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
                   <input type="hidden" name="q" value="{html.escape(state.query)}">
                   <input type="hidden" name="status" value="{html.escape(state.status)}">
                   <input type="hidden" name="page" value="{current_page}">
+                  <input type="hidden" name="window" value="{window_start}">
                   <input type="hidden" name="page_size" value="{state.page_size}">
                   <input type="hidden" name="theme" value="{html.escape(theme_name)}">
                   <button class="button small subtle" type="submit">恢复</button>
@@ -100,23 +108,53 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
 
     def tab(label: str, value: str) -> str:
         cls = "tab active" if state.status == value else "tab"
-        href = "/?" + urlencode({"status": value, "q": state.query, "page_size": state.page_size, "theme": theme_name})
+        href = "/?" + urlencode({"status": value, "q": state.query, "window": window_start, "page_size": state.page_size, "theme": theme_name})
         return f'<a class="{cls}" href="{href}">{label}</a>'
 
     message_html = f'<div class="flash">{html.escape(state.message)}</div>' if state.message else ""
     existing_total = sum(1 for item in all_records if item.exists)
     deleted_total = sum(1 for item in all_records if not item.exists)
 
-    page_links = []
-    visible_pages = list(range(current_page, min(total_pages, current_page + 4) + 1))
-    if not visible_pages:
-        visible_pages = [1]
+    page_links: list[str] = []
+    window_nav_links: list[str] = []
+    page_nav_links: list[str] = []
+    visible_pages = list(range(window_start, window_end + 1)) or [1]
+    previous_window_link = ""
+    next_window_link = ""
+    if window_start > 1:
+        previous_window_start = max(1, window_start - 5)
+        previous_window_href = "/?" + urlencode(
+            {"status": state.status, "q": state.query, "page": current_page, "window": previous_window_start, "page_size": state.page_size, "theme": theme_name}
+        )
+        previous_window_link = f'<a class="page-link nav-link" href="{previous_window_href}" aria-label="Previous Page Numbers">‹</a>'
+    else:
+        previous_window_link = '<span class="page-link nav-link disabled" aria-hidden="true">‹</span>'
     for page_no in visible_pages:
-        href = "/?" + urlencode({"status": state.status, "q": state.query, "page": page_no, "page_size": state.page_size, "theme": theme_name})
+        href = "/?" + urlencode({"status": state.status, "q": state.query, "page": page_no, "window": window_start, "page_size": state.page_size, "theme": theme_name})
         cls = "page-link active" if page_no == current_page else "page-link"
         page_links.append(f'<a class="{cls}" href="{href}">{page_no}</a>')
-    if visible_pages[-1] < total_pages:
-        page_links.append('<span class="page-ellipsis">...</span>')
+    if window_end < total_pages:
+        next_window_start = min(max_window_start, window_start + 5)
+        next_window_href = "/?" + urlencode(
+            {"status": state.status, "q": state.query, "page": current_page, "window": next_window_start, "page_size": state.page_size, "theme": theme_name}
+        )
+        next_window_link = f'<a class="page-link nav-link" href="{next_window_href}" aria-label="Next Page Numbers">›</a>'
+    else:
+        next_window_link = '<span class="page-link nav-link disabled" aria-hidden="true">›</span>'
+    if current_page > 1:
+        prev_href = "/?" + urlencode(
+            {"status": state.status, "q": state.query, "page": current_page - 1, "window": window_start, "page_size": state.page_size, "theme": theme_name}
+        )
+        page_nav_links.append(f'<a class="page-link jump-link" href="{prev_href}">Prev</a>')
+    else:
+        page_nav_links.append('<span class="page-link jump-link disabled" aria-hidden="true">Prev</span>')
+    if current_page < total_pages:
+        next_href = "/?" + urlencode(
+            {"status": state.status, "q": state.query, "page": current_page + 1, "window": window_start, "page_size": state.page_size, "theme": theme_name}
+        )
+        page_nav_links.append(f'<a class="page-link jump-link" href="{next_href}">Next</a>')
+    else:
+        page_nav_links.append('<span class="page-link jump-link disabled" aria-hidden="true">Next</span>')
 
     footer_actions = ""
     if state.status == "existing":
@@ -125,6 +163,7 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
             <input type="hidden" name="q" value="{html.escape(state.query)}">
             <input type="hidden" name="status" value="{html.escape(state.status)}">
             <input type="hidden" name="page" value="{current_page}">
+            <input type="hidden" name="window" value="{window_start}">
             <input type="hidden" name="page_size" value="{state.page_size}">
             <input type="hidden" name="theme" value="{html.escape(theme_name)}">
             <button class="button subtle" type="button" onclick="toggleAll(true)">全选</button>
@@ -139,12 +178,16 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
           <div class="footer-meta">
             <div class="pager-inline">
               <div class="readonly-note">第 {current_page} / {total_pages} 页</div>
+              <div class="pagination inline-pagination page-nav">{''.join(page_nav_links)}</div>
+              <div class="pagination inline-pagination window-nav">{previous_window_link}</div>
               <div class="pagination inline-pagination">{''.join(page_links)}</div>
+              <div class="pagination inline-pagination window-nav">{next_window_link}</div>
               <div class="readonly-note">共 {len(records)} 条</div>
             </div>
             <form method="get" action="/" class="page-size-form">
               <input type="hidden" name="status" value="{html.escape(state.status)}">
               <input type="hidden" name="q" value="{html.escape(state.query)}">
+              <input type="hidden" name="window" value="{window_start}">
               <input type="hidden" name="theme" value="{html.escape(theme_name)}">
               <label class="readonly-note" for="page_size">每页显示</label>
               <select name="page_size" id="page_size" onchange="this.form.submit()">
@@ -465,8 +508,8 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
         linear-gradient(45deg, transparent 50%, var(--muted) 50%),
         linear-gradient(135deg, var(--muted) 50%, transparent 50%);
       background-position:
-        calc(100% - 16px) calc(50% - 1px),
-        calc(100% - 11px) calc(50% - 1px);
+        calc(100% - 14px) calc(50% - 1px),
+        calc(100% - 10px) calc(50% - 1px);
       background-size: 5px 5px, 5px 5px;
       background-repeat: no-repeat;
     }}
@@ -740,6 +783,7 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
     .page-size-form select {{ min-width: 78px; min-height: 34px; padding: 6px 10px; }}
     .pagination {{ display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }}
     .inline-pagination {{ margin-top: 0; gap: 6px; }}
+    .page-nav, .window-nav {{ gap: 6px; }}
     .page-link {{
       display: inline-flex;
       align-items: center;
@@ -752,6 +796,18 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
       background: transparent;
       color: var(--ink);
       font-size: 11px;
+    }}
+    .jump-link {{
+      min-width: 58px;
+      padding: 0 10px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.56);
+    }}
+    .page-link.disabled {{
+      opacity: 0.38;
+      pointer-events: none;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.28);
     }}
     .page-link.active {{ background: var(--accent); color: #fffaf2; }}
     .page-ellipsis {{
@@ -1017,12 +1073,14 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
             <form class="hero-controls" method="get" action="/">
               <input type="hidden" name="status" value="{html.escape(state.status)}">
               <input type="hidden" name="q" value="{html.escape(state.query)}">
+              <input type="hidden" name="page" value="{current_page}">
+              <input type="hidden" name="window" value="{window_start}">
               <input type="hidden" name="page_size" value="{state.page_size}">
               <span class="control-label">Style</span>
               <select name="theme" aria-label="选择主题" onchange="this.form.submit()">
                 {theme_options}
               </select>
-              <a class="button icon-button" title="刷新" aria-label="刷新" href="/?{urlencode({'status': state.status, 'theme': theme_name, 'page_size': state.page_size, 'q': state.query})}">&#8635;</a>
+              <a class="button icon-button" title="刷新" aria-label="刷新" href="/?{urlencode({'status': state.status, 'theme': theme_name, 'page': current_page, 'window': window_start, 'page_size': state.page_size, 'q': state.query})}">&#8635;</a>
             </form>
           </div>
         </div>
@@ -1033,6 +1091,8 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
         </div>
         <form class="toolbar" method="get" action="/">
           <input type="hidden" name="status" value="{html.escape(state.status)}">
+          <input type="hidden" name="page" value="{current_page}">
+          <input type="hidden" name="window" value="{window_start}">
           <input type="hidden" name="page_size" value="{state.page_size}">
           <input type="hidden" name="theme" value="{html.escape(theme_name)}">
           <input type="search" name="q" placeholder="搜索会话 ID、主题或标题" value="{html.escape(state.query)}">
@@ -1044,9 +1104,9 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
       <section class="panel list-panel">
         <div class="list-panel-head">
           <div class="tabs">
-            {tab("当前存在", "existing")}
+            {tab("可继续", "existing")}
             {tab("已删除", "deleted")}
-            {tab("会话", "all")}
+            {tab("全部会话", "all")}
           </div>
           <div class="list-meta">
             <span class="meta-pill">当前视图 {len(records)} 条</span>
@@ -1177,7 +1237,7 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
     function copyCommand(command) {{
       copySessionId(command);
     }}
-    function openRenameDialog(sessionId, currentTitle, query, status, page, pageSize, theme) {{
+    function openRenameDialog(sessionId, currentTitle, query, status, page, windowValue, pageSize, theme) {{
       const nextTitle = window.prompt('设置标题', currentTitle || '');
       if (nextTitle === null) return;
       const form = document.createElement('form');
@@ -1189,6 +1249,7 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
         q: query,
         status: status,
         page: page,
+        window: windowValue,
         page_size: pageSize,
         theme: theme
       }};
