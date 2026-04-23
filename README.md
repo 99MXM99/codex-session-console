@@ -162,7 +162,7 @@ You will see three views:
 
 Inside the list, you can:
 - copy session IDs
-- set titles
+- set titles with the direct rename button in each existing-session row
 - inspect status dots
 - restore deleted sessions when single-session restore is available
 

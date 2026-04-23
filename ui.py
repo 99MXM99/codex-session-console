@@ -58,16 +58,19 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
         select_cell = f'<input class="row-check" type="checkbox" name="session_ids" value="{html.escape(record.id)}">' if row_selectable else ""
         if record.exists:
             actions = f"""
-                <details class="action-menu">
-                  <summary class="action-trigger" aria-label="更多操作" title="更多操作">⋯</summary>
-                  <div class="action-panel">
-                    <button
-                      class="button small menu-item"
-                      type="button"
-                      onclick="openRenameDialog('{html.escape(record.id)}', '{html.escape(record.thread_name)}', '{html.escape(state.query)}', '{html.escape(state.status)}', '{current_page}', '{window_start}', '{state.page_size}', '{html.escape(theme_name)}')"
-                    >设置标题</button>
-                  </div>
-                </details>
+                <button
+                  class="button small rename-button"
+                  type="button"
+                  data-session-id="{html.escape(record.id)}"
+                  data-current-title="{html.escape(record.thread_name)}"
+                  data-query="{html.escape(state.query)}"
+                  data-status="{html.escape(state.status)}"
+                  data-page="{current_page}"
+                  data-window="{window_start}"
+                  data-page-size="{state.page_size}"
+                  data-theme="{html.escape(theme_name)}"
+                  onclick="openRenameDialogFromButton(this)"
+                >改标题</button>
             """
         elif is_recoverable:
             actions = f"""
@@ -692,44 +695,7 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
       align-items: center;
       justify-content: flex-end;
     }}
-    .action-menu {{
-      position: relative;
-      display: inline-block;
-    }}
-    .action-menu summary {{ list-style: none; }}
-    .action-menu summary::-webkit-details-marker {{ display: none; }}
-    .action-trigger {{
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 28px;
-      height: 28px;
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      background: rgba(255,255,255,0.92);
-      color: var(--muted);
-      cursor: pointer;
-      font-size: 16px;
-      line-height: 1;
-    }}
-    .action-trigger:hover {{
-      color: var(--accent);
-      border-color: var(--accent);
-    }}
-    .action-panel {{
-      position: absolute;
-      top: calc(100% + 8px);
-      right: 0;
-      z-index: 20;
-      padding: 8px;
-      min-width: 110px;
-      border: 1px solid var(--line);
-      border-radius: 16px;
-      background: rgba(255,255,255,0.94);
-      box-shadow: 0 8px 24px var(--shadow);
-      {blur_css}
-    }}
-    .menu-item {{ width: 100%; }}
+    .rename-button {{ min-width: 74px; }}
     .command-trigger {{
       font-size: 15px;
     }}
@@ -874,7 +840,6 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
       gap: 10px;
     }}
     .theme-apple .copy-button,
-    .theme-apple .action-trigger,
     .theme-apple .tab,
     .theme-apple .button,
     .theme-apple select,
@@ -910,7 +875,6 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
     .theme-cohere .search-panel,
     .theme-cohere .list-panel,
     .theme-cohere table,
-    .theme-cohere .action-panel,
     .theme-cohere .command-dialog,
     .theme-cohere .command-item {{
       border-color: #d9d9dd;
@@ -930,8 +894,7 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
     .theme-cohere select,
     .theme-cohere input[type="search"],
     .theme-cohere input[type="text"],
-    .theme-cohere .copy-button,
-    .theme-cohere .action-trigger {{
+    .theme-cohere .copy-button {{
       background-color: #ffffff;
       border-color: #d9d9dd;
       box-shadow: none;
@@ -993,8 +956,7 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
     .theme-lamborghini .hero-controls,
     .theme-lamborghini .search-panel,
     .theme-lamborghini .list-panel,
-    .theme-lamborghini table,
-    .theme-lamborghini .action-panel {{
+    .theme-lamborghini table {{
       border-color: rgba(246, 195, 0, 0.18);
     }}
     .theme-lamborghini .list-panel {{
@@ -1015,8 +977,7 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
     .theme-lamborghini select,
     .theme-lamborghini input[type="search"],
     .theme-lamborghini input[type="text"],
-    .theme-lamborghini .copy-button,
-    .theme-lamborghini .action-trigger {{
+    .theme-lamborghini .copy-button {{
       background-color: rgba(27, 27, 31, 0.94);
       color: var(--ink);
       border-color: rgba(246, 195, 0, 0.16);
@@ -1024,8 +985,7 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
     }}
     .theme-lamborghini .tab,
     .theme-lamborghini .button.subtle,
-    .theme-lamborghini .copy-button,
-    .theme-lamborghini .action-trigger {{
+    .theme-lamborghini .copy-button {{
       box-shadow: 0 6px 16px rgba(0, 0, 0, 0.16);
     }}
     .theme-lamborghini .tab.active,
@@ -1315,8 +1275,21 @@ def render_html(records: list[SessionRecord], all_records: list[SessionRecord], 
     function copyCommand(command) {{
       copySessionId(command);
     }}
+    function openRenameDialogFromButton(button) {{
+      if (!button) return;
+      openRenameDialog(
+        button.dataset.sessionId || '',
+        button.dataset.currentTitle || '',
+        button.dataset.query || '',
+        button.dataset.status || 'existing',
+        button.dataset.page || '1',
+        button.dataset.window || '1',
+        button.dataset.pageSize || '10',
+        button.dataset.theme || 'paper'
+      );
+    }}
     function openRenameDialog(sessionId, currentTitle, query, status, page, windowValue, pageSize, theme) {{
-      const nextTitle = window.prompt('设置标题', currentTitle || '');
+      const nextTitle = window.prompt('改标题', currentTitle || '');
       if (nextTitle === null) return;
       const form = document.createElement('form');
       form.method = 'post';

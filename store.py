@@ -738,12 +738,12 @@ def rename_session(session_id: str, new_name: str) -> str:
     for row in rows:
         if str(row.get("id", "")) == session_id:
             row["thread_name"] = clean_name
-            row["updated_at"] = dt.datetime.now(dt.UTC).isoformat()
+            row["updated_at"] = dt.datetime.now(dt.timezone.utc).isoformat()
             found = True
             break
 
     if not found:
-        rows.append({"id": session_id, "thread_name": clean_name, "updated_at": dt.datetime.now(dt.UTC).isoformat()})
+        rows.append({"id": session_id, "thread_name": clean_name, "updated_at": dt.datetime.now(dt.timezone.utc).isoformat()})
 
     write_jsonl(SESSION_INDEX_PATH, rows)
     _rebuild_threads_table(DB_PATH)
