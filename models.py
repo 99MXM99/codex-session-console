@@ -12,9 +12,14 @@ class SessionRecord:
     id: str
     created_at: int
     created_at_text: str
-    theme: str
+    updated_at_text: str
+    codex_title: str
+    first_user_message: str
     thread_name: str
     renamed_title: str
+    class_key: str
+    class_name: str
+    project_path: str
     rollout_path: str
     exists: bool
 
@@ -24,6 +29,7 @@ class ViewState:
     """页面当前的筛选、分页与主题状态。"""
 
     query: str = ""
+    project: str = ""
     status: str = "existing"
     page: int = 1
     page_window: int = 0

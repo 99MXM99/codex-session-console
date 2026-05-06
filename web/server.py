@@ -10,8 +10,9 @@ from urllib.parse import parse_qs, urlparse
 
 from config import DEFAULT_JSON_OUTPUT, DEFAULT_TXT_OUTPUT
 from models import ViewState
-from store import delete_sessions, export_json, export_txt, filter_by_status, filter_sessions, hard_delete_sessions, load_sessions, rename_session, restore_session
-from ui import build_view_query, render_html
+from codex_store.store import delete_sessions, export_json, export_txt, filter_by_project, filter_by_status, filter_sessions, hard_delete_sessions, load_sessions, rename_session, restore_session, set_session_class_value
+from web.actions import open_selected_sessions
+from web.ui import build_view_query, render_html
 
 
 def parse_view_state(mapping: dict[str, list[str]]) -> ViewState:
@@ -32,6 +33,7 @@ def parse_view_state(mapping: dict[str, list[str]]) -> ViewState:
 
     return ViewState(
         query=first("q", ""),
+        project=first("project", ""),
         status=status,
         page=safe_int("page", 1),
         page_window=safe_int("window", 0),
@@ -59,7 +61,8 @@ class AppHandler(BaseHTTPRequestHandler):
             return
 
         state = parse_view_state(parse_qs(parsed.query))
-        visible = filter_by_status(filter_sessions(sessions, state.query), state.status)
+        project_records = filter_by_project(sessions, state.project)
+        visible = filter_by_status(filter_sessions(project_records, state.query), state.status)
         self._send(200, render_html(visible, sessions, state), "text/html; charset=utf-8")
 
     def do_POST(self) -> None:  # noqa: N802
@@ -73,6 +76,11 @@ class AppHandler(BaseHTTPRequestHandler):
             self._redirect(state, message)
             return
 
+        if self.path == "/open_selected":
+            message = self._run_action(lambda: open_selected_sessions(params.get("session_ids", [])))
+            self._redirect(state, message)
+            return
+
         if self.path == "/purge_selected":
             message = self._run_action(lambda: hard_delete_sessions(params.get("session_ids", [])))
             self._redirect(state, message)
@@ -82,6 +90,34 @@ class AppHandler(BaseHTTPRequestHandler):
             session_id = params.get("session_id", [""])[0]
             new_name = params.get("new_name", [""])[0]
             message = self._run_action(lambda: rename_session(session_id, new_name))
+            self._redirect(state, message)
+            return
+
+        if self.path == "/set_class":
+            session_id = params.get("session_id", [""])[0]
+            selected_key = params.get("class_key", [""])[0]
+            new_name = params.get("new_class_name", [""])[0].strip()
+            selected_name = params.get("class_name", [""])[0]
+            lookup_name = new_name or selected_name
+            normalized_lookup_name = " ".join(lookup_name.split()).lower()
+            if normalized_lookup_name:
+                for session in load_sessions():
+                    if session.class_name.lower() == normalized_lookup_name:
+                        selected_key = session.class_key
+                        selected_name = session.class_name
+                        new_name = ""
+                        break
+            target_key = ""
+            message = ""
+
+            def action() -> str:
+                nonlocal target_key
+                target_key, result = set_session_class_value(session_id, "" if new_name else selected_key, new_name or selected_name)
+                return result
+
+            message = self._run_action(action)
+            if target_key:
+                state.project = target_key
             self._redirect(state, message)
             return
 

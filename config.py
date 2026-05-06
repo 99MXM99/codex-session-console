@@ -14,6 +14,7 @@ DB_PATH = CODEX_DIR / "state_5.sqlite"
 SESSION_INDEX_PATH = CODEX_DIR / "session_index.jsonl"
 HISTORY_PATH = CODEX_DIR / "history.jsonl"
 BACKUP_DIR = CODEX_DIR / "session_manager_backups"
+CLASS_MAP_PATH = CODEX_DIR / "session_manager_classes.json"
 DEFAULT_TXT_OUTPUT = Path.home() / "Documents" / "codex_session_export.txt"
 DEFAULT_JSON_OUTPUT = Path.home() / "Documents" / "codex_session_export.json"
 TZ = ZoneInfo("Asia/Shanghai")

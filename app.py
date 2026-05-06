@@ -8,8 +8,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from server import run_server
-from store import export_json, export_txt, load_sessions
+from codex_store.store import export_json, export_txt, load_sessions
+from web.server import run_server
 
 
 def build_parser() -> argparse.ArgumentParser:

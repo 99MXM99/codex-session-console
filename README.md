@@ -1,80 +1,88 @@
 # Codex Session Console
 
-A local session management tool for Codex.
+Codex Session Console is a local desktop-style manager for Codex CLI sessions.
 
-Its purpose is straightforward:
-- turn the session data inside `~/.codex` into a visual, searchable list
-- let you filter, rename, delete, and restore sessions directly in the UI
-- provide `txt` and `json` exports for backup, archiving, or further processing
-- back up underlying data automatically before high-impact operations
-
-The current version runs as a local Web UI by default and also supports desktop-style launchers:
-- macOS: desktop `.app`
-- Linux: `.desktop` entry
+It reads the session data stored under `~/.codex` and presents it as a searchable UI where you can continue, classify, rename, delete, restore, and export conversations.
 
 ## Screenshots
 
-### Overview
+### Session Overview
 
 ![Overview](docs/screenshots/overview.png)
 
-### Deleted Sessions and Restore State
+### Deleted Sessions
 
 ![Deleted View](docs/screenshots/deleted-view.png)
 
-### Theme Examples
+### Themes
 
 ![Cohere Theme](docs/screenshots/theme-cohere.png)
 
 ![Lamborghini Theme](docs/screenshots/theme-lamborghini.png)
 
-## When This Is Useful
+## What It Does
 
-- You have many Codex conversations and want a single place to inspect and clean them up.
-- You want to assign clearer titles to important sessions.
-- You want to distinguish between existing, deleted, recoverable, and non-recoverable sessions.
-- You want to export local session data as `txt` or `json`.
-
-## Features
-
-- Session list view
-- Status filters: `Existing / Deleted / All`
-- Search by `ID / topic / title`
-- Set custom titles in the UI
-- Bulk delete for existing sessions
-- Permanent delete for already deleted sessions
-- Restore deleted sessions when single-session recovery is supported by backups
-- Export as `txt` / `json`
-- Multiple built-in themes
-- Desktop launch support for macOS and Linux
-- Self-healing writes for damaged `threads` table metadata
+- Shows existing and deleted Codex sessions in one local interface.
+- Groups sessions by project or custom class.
+- Lets you set a display title without overwriting the original Codex title.
+- Lets you move a session into a custom class without changing its real working directory.
+- Opens selected existing sessions from the UI.
+- Deletes, permanently deletes, and restores sessions when recovery data exists.
+- Exports session lists as `TXT` or `JSON`.
+- Creates backups before high-impact write operations.
 
 ## Requirements
 
-- `python3` must be available
-- To see actual session data, the machine must have local Codex data in `~/.codex`
-- Desktop launcher support:
-  - macOS: `.app`
-  - Linux: `.desktop`
+- macOS or Linux
+- `python3`
+- `lsof`
+- Local Codex data in `~/.codex` if you want to see real sessions
 
-If the target machine does not have Codex installed, or does not have local session data:
-- the app can still start
-- the page will simply be empty
-- it should not crash just because data is missing
+If Codex is not installed, or if no session data exists, the app can still open. The list will simply be empty.
 
-## Quick Start
+## Installation
 
-### Option 1: Run from the command line
+### macOS App
 
-From the project directory:
+Run this from the project directory:
+
+```bash
+./tools/install_mac_app.sh
+```
+
+This creates:
+
+```text
+~/Desktop/Codex Session Console.app
+```
+
+You can move the app to Applications or keep it on the Desktop. If the project folder is moved later, run the installer again so the app points to the new path.
+
+### Linux Desktop Launcher
+
+Run:
+
+```bash
+./tools/install_linux_app.sh
+```
+
+This creates:
+
+- `~/.local/bin/codex-session-console`
+- `~/.local/share/applications/codex-session-console.desktop`
+- `~/Desktop/Codex Session Console.desktop` when a Desktop folder exists
+
+Some Linux desktops require you to right-click the `.desktop` file and choose an option such as `Allow Launching` before double-clicking works.
+
+## Run Without Installing
+
+Start the UI and open the browser:
 
 ```bash
 python3 app.py --open
 ```
 
-This starts the local server and opens the UI in your browser.
-
-If you want to start the server without opening the browser automatically:
+Start only the local server:
 
 ```bash
 python3 app.py
@@ -86,282 +94,227 @@ Default address:
 http://127.0.0.1:8876
 ```
 
-### Option 2: Double-click the project launcher
-
-The project root already includes a macOS launcher:
+The project root also includes a macOS launcher:
 
 ```text
 Launch Codex Session Manager.command
 ```
 
-Double-clicking it will:
-- start the local service
-- open the UI automatically
+Double-click it to start the local service and open the page.
 
-### Option 3: Install the macOS desktop app
+## Interface Guide
 
-If you want a desktop icon on macOS:
+### Header
 
-```bash
-./tools/install_mac_app.sh
-```
+The top-right controls provide:
 
-This creates:
+- Theme switcher
+- Refresh
+- Quick command menu
+
+### Search
+
+Search matches:
+
+- Session ID
+- Custom title
+- Codex title
+- Project path
+- Class name
+- First user message
+
+### Projects/Class Panel
+
+The left panel controls the session group shown on the right.
+
+- `全部会话` shows every session.
+- `Default Class` represents sessions opened from your home directory.
+- Project groups come from the original Codex `cwd`.
+- Custom classes are created from the row action menu.
+- Empty custom classes are hidden automatically after their last session is moved away.
+
+Custom class data is stored here:
 
 ```text
-Codex Session Console.app
+~/.codex/session_manager_classes.json
 ```
 
-on your Desktop, and you can then launch it by double-clicking the app.
+Changing a class does not change the original Codex working directory.
 
-If you move the project directory later, run the installer again.
+### Session List
 
-### Option 4: Install the Linux desktop entry
+The right panel has two status views:
 
-On Linux:
+- `可继续`: sessions whose rollout file still exists
+- `已删除`: sessions whose current rollout file is missing
 
-```bash
-./tools/install_linux_app.sh
-```
+Columns:
 
-This script creates:
-- `~/.local/bin/codex-session-console`
-- `~/.local/share/applications/codex-session-console.desktop`
-- `~/Desktop/Codex Session Console.desktop` if a Desktop directory exists
+- `ID`: shortened session ID, with a copy button for the full ID
+- `时间`: session creation time; hover to see last opened time
+- `标题`: your display title
+- `Codex 标题`: original Codex title
+- `操作`: row actions
 
-After that, you can:
-- search for `Codex Session Console` in your application menu
-- or double-click `Codex Session Console.desktop` on the Desktop
+Status dots:
 
-Some Linux desktop environments require an extra confirmation the first time you open a `.desktop` file, such as:
-- `Allow Launching`
-- or a trust/launch confirmation
-
-## How to Use the UI
-
-### 1. Header area
-
-The top-right controls let you:
-- switch themes
-- refresh the page
-- open the quick command menu
-
-### 2. Search area
-
-You can search by:
-- session ID
-- topic
-- custom title
-
-### 3. List area
-
-You will see three views:
-- `Existing`
-- `Deleted`
-- `All`
-
-Inside the list, you can:
-- copy session IDs
-- set titles with the direct rename button in each existing-session row
-- inspect status dots
-- restore deleted sessions when single-session restore is available
-
-Status dot meanings:
 - Green: session can still be continued
-- Yellow: deleted, but recoverable
+- Yellow: deleted and recoverable
 - Red: deleted and not recoverable
 
-### 4. Pagination area
+### Row Actions
 
-At the bottom you can:
-- switch pages
-- adjust page size
-- bulk delete selected sessions in the `Existing` view
-- permanently delete selected sessions in the `Deleted` view
+Click `···` on an existing session.
 
-## Common Commands
+Available actions:
 
-Start the UI:
+- `改标题`: sets the display title shown in the `标题` column
+- `改分类`: moves the session into an existing project/class or a new custom class
 
-```bash
-python3 app.py --open
+Display titles are stored in:
+
+```text
+~/.codex/session_index.jsonl
 ```
 
-Export as text:
+The original Codex title remains visible in the `Codex 标题` column.
+
+### Batch Actions
+
+In the `可继续` view:
+
+- Select multiple sessions
+- Open selected sessions
+- Delete selected sessions
+
+In the `已删除` view:
+
+- Select multiple sessions
+- Permanently delete selected sessions
+- Restore a recoverable session from backups
+
+## Export
+
+Export text:
 
 ```bash
 python3 app.py export txt
 ```
 
-Export as JSON:
+Export JSON:
 
 ```bash
 python3 app.py export json
 ```
 
-Install the macOS desktop app:
+The UI also has `导出 TXT` and `导出 JSON` buttons.
 
-```bash
-./tools/install_mac_app.sh
-```
+## Data and Backups
 
-Install the Linux desktop entry:
-
-```bash
-./tools/install_linux_app.sh
-```
-
-## Data Sources
-
-By default, the app reads these local files:
+The app reads local Codex data from:
 
 - `~/.codex/state_5.sqlite`
 - `~/.codex/session_index.jsonl`
 - `~/.codex/history.jsonl`
 - `~/.codex/sessions/...`
 
-## Data Safety and Restore Behavior
+The app writes its own management data to:
 
-This is the most important operational detail in the project.
+- `~/.codex/session_index.jsonl`
+- `~/.codex/session_manager_classes.json`
+- `~/.codex/session_manager_backups/`
 
-Before the following actions, the app creates backups of the underlying data:
-- deleting sessions
-- renaming titles
+Before write operations such as delete, restore, permanent delete, and title changes, the app creates backups when the underlying Codex data may be affected.
 
-Backup directory:
+Backup folder:
 
 ```text
 ~/.codex/session_manager_backups/
 ```
 
-Notes:
-- Recoverability is checked against all backups, not just the newest few.
-- Older backups may not contain complete original session files.
-- Newer deletions also back up the matching rollout files.
-- A session is only considered individually recoverable when both metadata and the original session file are available in backup data.
-- Permanent delete removes the session from the current Codex data and also scrubs matching traces from all stored backups.
-- If the local `threads` table becomes inconsistent or contains duplicate session IDs, write operations rebuild that table before continuing.
-- Corrupted historical backup databases are skipped instead of blocking current delete operations.
+Recoverability depends on whether both metadata and the original rollout file exist in backup data.
 
-## Project Structure
+## Safety Notes
 
-The project deliberately stays close to the Python standard library and avoids unnecessary dependencies.
+- Setting a display title does not overwrite the original Codex title.
+- Setting a custom class does not modify the original project path.
+- Delete operations create backups before changing Codex metadata.
+- Permanent delete removes matching data from current Codex records and stored manager backups.
+- Damaged or incomplete backup files are skipped instead of blocking current operations.
 
-- `app.py`  
-  Thin CLI entry point. Handles argument parsing and dispatch.
+## Troubleshooting
 
-- `server.py`  
-  Local HTTP service layer. Handles requests and response flow.
+### The app opens but the page does not change after an update
 
-- `store.py`  
-  Data access layer. Reads and writes SQLite, jsonl, backup, delete, and restore operations.
+Restart the local service by closing the app and opening it again. If a browser tab still shows an old page, refresh `http://127.0.0.1:8876`.
 
-- `ui.py`  
-  HTML rendering layer. Returns full pages directly.
-
-- `models.py`  
-  Shared data models.
-
-- `config.py`  
-  Global configuration such as paths, timezone, and theme definitions.
-
-- `Launch Codex Session Manager.command`  
-  Project-level double-click launcher for macOS.
-
-- `tools/run_local_ui.sh`  
-  Shared launcher script used by both macOS and Linux desktop entry flows.
-
-- `tools/install_mac_app.sh`  
-  Installs the macOS desktop app.
-
-- `tools/install_linux_app.sh`  
-  Installs the Linux `.desktop` launcher.
-
-- `macos/`  
-  macOS app templates and icon assets.
-
-- `linux/`  
-  Linux desktop entry templates and icon assets.
-
-## Maintenance Notes
-
-The current version has already gone through a cleanup pass focused on maintainability:
-- startup logic is centralized in one shared script
-- request parsing is guarded so invalid pagination values do not crash the server
-- malformed lines in `session_index.jsonl` are skipped instead of failing the whole UI
-- the macOS desktop app uses a repository-bundled icon instead of rebuilding an icon during install
-- destructive writes surface readable error messages in the UI instead of failing silently
-- permanent delete and restore paths can repair a broken `threads` table before writing
-
-If you continue developing the project, keep these boundaries:
-- change data read/write behavior in `store.py`
-- change HTTP behavior in `server.py`
-- change layout and styling in `ui.py`
-- change launch or packaging behavior in `tools/`, `macos/`, and `linux/`
-
-## FAQ
-
-### The macOS `.app` does not open
+### The macOS app does not open
 
 Check:
-- `python3` exists on the machine
-- the project directory still exists at the path used during installation
 
-If the project was moved, reinstall:
+- `python3` is installed
+- The project folder still exists at the path used during installation
+
+Reinstall:
 
 ```bash
 ./tools/install_mac_app.sh
 ```
 
-### The Linux `.desktop` launcher does not open
+### The Linux launcher does not open
 
 Check:
+
 - `python3` is installed
 - `lsof` is installed
-- `xdg-open` is available if you want automatic browser opening
-- the project directory was not moved
+- `xdg-open` is available if automatic browser opening is expected
+- The project folder was not moved after installation
 
-If the project path changed, reinstall:
+Reinstall:
 
 ```bash
 ./tools/install_linux_app.sh
 ```
 
-If your desktop environment blocks `.desktop` files, you may need to explicitly allow or trust the launcher first.
+### The page shows no sessions
 
-### The page opens but shows no sessions
+Common causes:
 
-Usually one of these is true:
-- Codex is not installed on the machine
-- there is no data inside `~/.codex`
-- the current user cannot read the relevant files
+- Codex has not been used on this machine
+- `~/.codex` does not exist
+- The current user cannot read the Codex data files
 
-### Why are some deleted sessions recoverable and others not?
+### A deleted session is not recoverable
 
-Because single-session restore requires both:
-- session metadata
-- the original rollout file for that same session
+Single-session restore requires both:
 
-If either part is missing, the session is treated as non-recoverable.
+- Session metadata
+- The original rollout file
 
-### The desktop app icon did not refresh immediately on macOS
+If either part is missing, the session is shown as non-recoverable.
 
-That is usually Finder cache behavior. Any of these usually fixes it:
-- reopen Finder
-- move the `.app` once on the Desktop
-- remove it and run `./tools/install_mac_app.sh` again
+## Project Layout
 
-## Is This Ready for Open Source?
+```text
+app.py                  CLI entry point
+config.py               Paths, timezone, and theme settings
+models.py               Shared data models
+codex_store/            Codex data reading, writing, backup, restore, delete logic
+web/                    Local HTTP server, HTML, CSS, and browser-side scripts
+tools/                  Run and install scripts
+macos/                  macOS app template and icon
+linux/                  Linux desktop launcher template and icon
+docs/screenshots/       README screenshots
+```
 
-Yes.
+## Development Checks
 
-The structure is already clear enough that others can clone the repo and:
-- run `python3 app.py --open`
-- install the macOS app with `./tools/install_mac_app.sh`
-- install the Linux launcher with `./tools/install_linux_app.sh`
+Before committing changes, run:
 
-If you want to polish the repository further, the next useful additions would be:
-- release tags
-- a changelog
-- more screenshots
-- a short installation demo
+```bash
+python3 -m py_compile app.py config.py models.py codex_store/*.py web/*.py web/style_sections/*.py
+bash -n tools/run_local_ui.sh
+bash -n tools/install_mac_app.sh
+bash -n tools/install_linux_app.sh
+git diff --check
+```
